@@ -16,6 +16,19 @@ void floyd_warshall_cpu(std::vector<std::vector<int>>& d) {
   }
 }
 
+__global__ void floyd_warshall_gpu(int** d, size_t n){
+  //d = new int*[n];
+  for(int k = 0; k < n; ++k) {
+    for(int i = 0; i < n; ++i) {
+      for(int j = 0; j < n; ++j) {
+        if(d[i][j] > d[i][k] + d[k][j]) {
+          d[i][j] = d[i][k] + d[k][j];
+        }
+      }
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   if(argc != 2) {
     std::cout << "usage: " << argv[0] << " <matrix size>" << std::endl;
@@ -36,7 +49,11 @@ int main(int argc, char** argv) {
 
   // III. Running Floyd Warshall on GPU (single core).
 
-  // TODO
+  long gpu_ms = benchmark_one_ms([&]{
+    floyd_warshall_gpu<<<1,1>>>(gpu_distances, n);
+  });
+  std::cout << "GPU: " << gpu_ms << " ms" << std::endl;
+
 
   // IV. Verifying both give the same result and deallocating.
   check_equal_matrix(cpu_distances, gpu_distances);
