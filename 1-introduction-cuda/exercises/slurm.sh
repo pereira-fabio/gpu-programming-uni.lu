@@ -16,4 +16,4 @@ module load system/CUDA
 nvcc thread_floyd.cu -arch=sm_70 -std=c++17 -O3 -o thread_floyd
 
 # Execute the code. Anything output will be stored in slurm.out (see above).
-./hello
+./thread_floyd
