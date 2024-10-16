@@ -17,7 +17,7 @@ void floyd_warshall_cpu(std::vector<std::vector<int>>& d) {
 }
 
 __global__ void floyd_warshall_gpu(int** d, size_t n){
-  //d = new int*[n];
+  d = new int*[n];
   for(int k = 0; k < n; ++k) {
     for(int i = 0; i < n; ++i) {
       for(int j = 0; j < n; ++j) {
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
 
   long gpu_ms = benchmark_one_ms([&]{
     floyd_warshall_gpu<<<1,1>>>(gpu_distances, n);
-     cudaDeviceSynchronize()
+     cudaDeviceSynchronize();
   });
   std::cout << "GPU: " << gpu_ms << " ms" << std::endl;
 

@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #SBATCH --time=00:05:00
-#SBATCH --reservation=GPU_Programming_10d2
+#SBATCH --reservation=GPU_Programming_10d9
 #SBATCH --nodes=1
 #SBATCH --partition=gpu
 #SBATCH --cpus-per-task=1
@@ -16,4 +16,4 @@ module load system/CUDA
 nvcc thread_floyd.cu -arch=sm_70 -std=c++17 -O3 -o thread_floyd
 
 # Execute the code. Anything output will be stored in slurm.out (see above).
-./hello
+./thread_floyd  1000
