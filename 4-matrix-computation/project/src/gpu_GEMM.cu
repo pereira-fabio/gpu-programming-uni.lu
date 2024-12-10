@@ -6,7 +6,6 @@
 #include <cmath>
 
 #include <cblas.h>
-#include <cublasXt.h>
 
 #include "utility.hpp"
 #include "datatypes.hpp"
@@ -33,6 +32,60 @@ __host__ __device__ inline size_t quotient_ceiling( size_t const dimension, size
 
   return q;
 }
+
+template<typename T>
+__global__ void gpu_GEMM_naive(
+  size_t const M, size_t const N, size_t const K,
+  T const alpha,
+  T const* const A, size_t const ldA, T const* const B, size_t const ldB,
+  T const beta,
+  T* const C, size_t const ldC
+) {
+  size_t const i = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t const j = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if ( i >= M || j >= N ) return;
+
+  T c_ij = static_cast<T>(0);
+
+  for ( size_t l = 0; l < K; l++ ) {
+    T const a_il = A[i + ldA*l];
+    T const b_lj = B[l + ldB*j];
+    c_ij += a_il * b_lj;
+  }
+
+  size_t const idx_C_ij = i + ldC*j;
+  C[idx_C_ij] = alpha * c_ij + beta * C[idx_C_ij];
+}
+
+
+/*
+ * For your exercise you need to implement the tiled matrix multiplication algorithm.
+ *
+ * The algorithm implements a subset of the operations of GEMM, ignoring the ability of 
+ * complete implementation to apply transposition operations to A and B. We are
+ * following the conventions of BLAS in term of all other inputs:
+ *
+ * - A : M * K
+ * - B : K * N
+ * - C : M * N
+ *
+ * Furthermore, all matrices are stored in column-major format, so ldX is always equal
+ * or greater of the first dimension of matrix X.
+ */
+template<typename T>
+__global__ void gpu_GEMM_tiling(
+  size_t const M, size_t const N, size_t const K,
+  T const alpha,
+  T const* const A, size_t const ldA, T const* const B, size_t const ldB,
+  T const beta,
+  T* const C, size_t const ldC
+) {
+  __shared__ float tile_A[BLOCK_SIDE * BLOCK_SIDE];
+  __shared__ float tile_B[BLOCK_SIDE * BLOCK_SIDE];
+
+  // Your implementation goes here.
+ }
 
 template<typename T>
 void gpu_GEMM(
@@ -90,56 +143,6 @@ void gpu_GEMM(
   cudaEventElapsedTime(&duration, start, stop);
 }
 
-template<typename T>
-__global__ void gpu_GEMM_naive(
-  size_t const M, size_t const N, size_t const K,
-  T const alpha,
-  T const* const A, size_t const ldA, T const* const B, size_t const ldB,
-  T const beta,
-  T* const C, size_t const ldC
-) {
-  size_t const i = blockIdx.x * blockDim.x + threadIdx.x;
-  size_t const j = blockIdx.y * blockDim.y + threadIdx.y;
-
-  if ( i >= M || j >= N ) return;
-
-  T c_ij = static_cast<T>(0);
-
-  for ( size_t l = 0; l < K; l++ ) {
-    T const a_il = A[i + ldA*l];
-    T const b_lj = B[l + ldB*j];
-    c_ij += a_il * b_lj;
-  }
-
-  size_t const idx_C_ij = i + ldC*j;
-  C[idx_C_ij] = alpha * c_ij + beta * C[idx_C_ij];
-}
-
-template<typename T>
-__global__ void gpu_GEMM_coalesce(
-  size_t const M, size_t const N, size_t const K,
-  T const alpha,
-  T const* const A, size_t const ldA, T const* const B, size_t const ldB,
-  T const beta,
-  T* const C, size_t const ldC
-) {
-  size_t const i = blockIdx.x * blockDim.x + threadIdx.y;
-  size_t const j = blockIdx.y * blockDim.y + threadIdx.x;
-
-  if ( i >= M || j >= N ) return;
-
-  T c_ij = static_cast<T>(0);
-
-  for ( size_t l = 0; l < K; l++ ) {
-    T const a_il = A[i + ldA*l];
-    T const b_lj = B[l + ldB*j];
-    c_ij += a_il * b_lj;
-  }
-
-  size_t const idx_C_ij = i + ldC*j;
-  C[idx_C_ij] = alpha * c_ij + beta * C[idx_C_ij];
-}
-
 float f_norm(DenseMatrix<float> const& mtx) {
   float norm = 0.0;
   for ( size_t i = 0; i < mtx.n; i++ ) {
@@ -152,7 +155,7 @@ float f_norm(DenseMatrix<float> const& mtx) {
 }
 
 void matrix_saxpy(
-  size_t const M, size_t const N,
+  size_t const N,
   float const alpha,
   float const* A, size_t const lda, float* B, size_t const ldb
 ) {
@@ -167,7 +170,7 @@ void matrix_saxpy(
     //   const CBLAS_INT N, const float alpha, const float *X,
     //   const CBLAS_INT incX, float *Y, const CBLAS_INT incY
     // );
-    cblas_saxpy(M, alpha, X, incX, Y, incY);
+    cblas_saxpy(N, alpha, X, incX, Y, incY);
   }
 }
 
@@ -195,18 +198,18 @@ float gemm_error(
   //   const float beta,
   //   float *C, const CBLAS_INT ldc
   // );
-
   cblas_sgemm(
     CblasColMajor, CblasNoTrans, CblasNoTrans,
     M, N, K,
     alpha,
     mtxA.data, mtxA.ld, mtxB.data, mtxB.ld,
-    beta, accu.data, accu.ld
+    beta,
+    accu.data, accu.ld
   );
 
   // accu <- accu - C
   matrix_saxpy(
-    M, N,
+    M,
     -1.0,
     mtxC.data, mtxC.ld, accu.data, accu.ld
   );
@@ -269,10 +272,10 @@ int main( int argc, char** argv ) {
             << "  - Duration [ms]: " << duration  << "\n";
 
   duration = 0.0;
-  gpu_GEMM(alpha, mtxA, mtxB, beta, mtxC, gpu_GEMM_coalesce, duration);
+  gpu_GEMM(alpha, mtxA, mtxB, beta, mtxC, gpu_GEMM_tiling, duration);
   error = gemm_error(alpha, mtxA, mtxB, beta, mtxC);
 
-  std::cout << "GEMM (anti) coalesce\n"
+  std::cout << "GEMM tiling\n"
             << "  - Error (Frobenius norm): " << error << "\n"
             << "  - Duration [ms]: " << duration  << "\n";
 
